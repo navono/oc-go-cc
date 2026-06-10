@@ -395,14 +395,14 @@ func modelsCmd() *cobra.Command {
 			fmt.Println("  kimi-k2.5          OpenAI-compatible")
 			fmt.Println("  mimo-v2.5-pro      OpenAI-compatible")
 			fmt.Println("  mimo-v2.5          OpenAI-compatible")
-			fmt.Println("  mimo-v2-pro        OpenAI-compatible")
-			fmt.Println("  mimo-v2-omni       OpenAI-compatible")
-			fmt.Println("  minimax-m2.7       Anthropic-compatible")
-			fmt.Println("  minimax-m2.5       Anthropic-compatible")
 			fmt.Println("  deepseek-v4-pro    OpenAI-compatible")
 			fmt.Println("  deepseek-v4-flash  OpenAI-compatible")
-			fmt.Println("  qwen3.6-plus       OpenAI-compatible")
-			fmt.Println("  qwen3.5-plus       OpenAI-compatible")
+			fmt.Println("  minimax-m3         Anthropic-compatible")
+			fmt.Println("  minimax-m2.7       Anthropic-compatible")
+			fmt.Println("  minimax-m2.5       Anthropic-compatible")
+			fmt.Println("  qwen3.7-max        Anthropic-compatible")
+			fmt.Println("  qwen3.7-plus       Anthropic-compatible")
+			fmt.Println("  qwen3.6-plus       Anthropic-compatible")
 			fmt.Println()
 			fmt.Println("Use these model IDs in your config.json file.")
 		},
@@ -491,7 +491,7 @@ func getDefaultConfig() string {
   "models": {
     "background": {
       "provider": "opencode-go",
-      "model_id": "qwen3.5-plus",
+      "model_id": "qwen3.7-plus",
       "temperature": 0.5,
       "max_tokens": 2048
     },
@@ -503,7 +503,7 @@ func getDefaultConfig() string {
     },
     "long_context": {
       "provider": "opencode-go",
-      "model_id": "minimax-m2.5",
+      "model_id": "minimax-m3",
       "temperature": 0.7,
       "max_tokens": 16384,
       "context_threshold": 80000
@@ -533,23 +533,23 @@ func getDefaultConfig() string {
       { "provider": "opencode-go", "model_id": "minimax-m2.5" }
     ],
     "default": [
-      { "provider": "opencode-go", "model_id": "mimo-v2-pro" },
+      { "provider": "opencode-go", "model_id": "kimi-k2.5" },
       { "provider": "opencode-go", "model_id": "qwen3.6-plus" }
     ],
     "long_context": [
       { "provider": "opencode-go", "model_id": "minimax-m2.7" },
-      { "provider": "opencode-go", "model_id": "kimi-k2.6" }
+      { "provider": "opencode-go", "model_id": "minimax-m2.5" }
     ],
     "think": [
-      { "provider": "opencode-go", "model_id": "kimi-k2.6" },
-      { "provider": "opencode-go", "model_id": "mimo-v2-pro" }
+      { "provider": "opencode-go", "model_id": "deepseek-v4-flash" },
+      { "provider": "opencode-go", "model_id": "kimi-k2.6" }
     ],
     "complex": [
       { "provider": "opencode-go", "model_id": "glm-5" },
       { "provider": "opencode-go", "model_id": "kimi-k2.6" }
     ],
     "fast": [
-      { "provider": "opencode-go", "model_id": "qwen3.5-plus" },
+      { "provider": "opencode-go", "model_id": "deepseek-v4-flash" },
       { "provider": "opencode-go", "model_id": "minimax-m2.5" }
     ]
   },

@@ -15,12 +15,12 @@ func TestAppendUniqueModels_DedupsByModelID(t *testing.T) {
 	}
 	extra := []config.ModelConfig{
 		{Provider: "opencode-go", ModelID: "kimi-k2.6"}, // dup of base[0]
-		{Provider: "opencode-go", ModelID: "mimo-v2-pro"},
+		{Provider: "opencode-go", ModelID: "kimi-k2.5"},
 		{Provider: "opencode-go", ModelID: "glm-5"}, // dup of base[1]
 	}
 
 	got := appendUniqueModels(base, extra)
-	wantIDs := []string{"kimi-k2.6", "glm-5", "mimo-v2-pro"}
+	wantIDs := []string{"kimi-k2.6", "glm-5", "kimi-k2.5"}
 
 	if len(got) != len(wantIDs) {
 		t.Fatalf("got %d models, want %d (got=%+v)", len(got), len(wantIDs), got)
@@ -122,7 +122,7 @@ func TestBuildModelChain_NoOverride_UsesScenarioRoute(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "mimo-v2-pro"},
+				{Provider: "opencode-go", ModelID: "kimi-k2.5"},
 				{Provider: "opencode-go", ModelID: "qwen3.6-plus"},
 			},
 		},
@@ -133,7 +133,7 @@ func TestBuildModelChain_NoOverride_UsesScenarioRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []string{"kimi-k2.6", "mimo-v2-pro", "qwen3.6-plus"}
+	want := []string{"kimi-k2.6", "kimi-k2.5", "qwen3.6-plus"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
 		t.Errorf("chain = %v, want %v", got, want)
 	}
@@ -151,7 +151,7 @@ func TestBuildModelChain_Override_AppendsScenarioChainDeduped(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "mimo-v2-pro"},
+				{Provider: "opencode-go", ModelID: "kimi-k2.5"},
 				{Provider: "opencode-go", ModelID: "qwen3.6-plus"},
 			},
 		},
@@ -172,8 +172,8 @@ func TestBuildModelChain_Override_AppendsScenarioChainDeduped(t *testing.T) {
 	}
 
 	// Order: [override.primary=kimi-k2.6, scenario.primary=kimi-k2.6 (DROPPED), scenario.fallbacks...]
-	// Final chain: [kimi-k2.6, mimo-v2-pro, qwen3.6-plus]
-	want := []string{"kimi-k2.6", "mimo-v2-pro", "qwen3.6-plus"}
+	// Final chain: [kimi-k2.6, kimi-k2.5, qwen3.6-plus]
+	want := []string{"kimi-k2.6", "kimi-k2.5", "qwen3.6-plus"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
 		t.Errorf("chain = %v, want %v (dedup must drop scenario.primary that overlaps override.primary)", got, want)
 	}
@@ -197,7 +197,7 @@ func TestBuildModelChain_Override_AppendsUniqueScenarioModels(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "mimo-v2-pro"},
+				{Provider: "opencode-go", ModelID: "kimi-k2.5"},
 			},
 		},
 		ModelOverrides: map[string]config.ModelConfig{
@@ -215,11 +215,11 @@ func TestBuildModelChain_Override_AppendsUniqueScenarioModels(t *testing.T) {
 	}
 	// Chain construction:
 	//   1. override primary       = claude-sonnet-4.5
-	//   2. default fallbacks      = [mimo-v2-pro]            (from fallbacks["default"])
+	//   2. default fallbacks      = [kimi-k2.5]            (from fallbacks["default"])
 	//   3. scenario safety-net:
 	//        scenario primary      = kimi-k2.6                 (new)
-	//        scenario fallbacks    = [mimo-v2-pro]            (dup, dropped)
-	want := []string{"claude-sonnet-4.5", "mimo-v2-pro", "kimi-k2.6"}
+	//        scenario fallbacks    = [kimi-k2.5]            (dup, dropped)
+	want := []string{"claude-sonnet-4.5", "kimi-k2.5", "kimi-k2.6"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
 		t.Errorf("chain = %v, want %v", got, want)
 	}
@@ -238,7 +238,7 @@ func TestBuildModelChain_Override_NoMatchingFallbacksKey(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "mimo-v2-pro"},
+				{Provider: "opencode-go", ModelID: "kimi-k2.5"},
 			},
 		},
 		ModelOverrides: map[string]config.ModelConfig{
@@ -251,11 +251,11 @@ func TestBuildModelChain_Override_NoMatchingFallbacksKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Expected: [override primary, default fallback (mimo-v2-pro), scenario primary (kimi-k2.6)]
-	// Note: mimo-v2-pro is in BOTH the default fallback and NOT in the scenario
+	// Expected: [override primary, default fallback (kimi-k2.5), scenario primary (kimi-k2.6)]
+	// Note: kimi-k2.5 is in BOTH the default fallback and NOT in the scenario
 	// chain here, so dedup is exercised on the override primary not overlapping
 	// the scenario primary.
-	want := []string{"claude-sonnet-4.5", "mimo-v2-pro", "kimi-k2.6"}
+	want := []string{"claude-sonnet-4.5", "kimi-k2.5", "kimi-k2.6"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
 		t.Errorf("chain = %v, want %v (override -> default fallback -> scenario primary)", got, want)
 	}
@@ -271,8 +271,8 @@ func TestBuildModelChain_StreamingFlag_UsesStreamingRoute(t *testing.T) {
 			"fast":    {Provider: "opencode-go", ModelID: "qwen3.6-plus"},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "mimo-v2-pro"}},
-			"fast":    {{ModelID: "qwen3.5-plus"}},
+			"default": {{ModelID: "kimi-k2.5"}},
+			"fast":    {{ModelID: "qwen3.7-plus"}},
 		},
 		ModelOverrides: map[string]config.ModelConfig{
 			"claude-sonnet-4.5": {Provider: "opencode-zen", ModelID: "claude-sonnet-4.5"},
@@ -287,10 +287,10 @@ func TestBuildModelChain_StreamingFlag_UsesStreamingRoute(t *testing.T) {
 	}
 
 	// Streaming: override still wins, but the safety-net uses fast route.
-	// Chain: [claude-sonnet-4.5 (override), mimo-v2-pro (default fallback),
-	//         qwen3.6-plus (fast scenario primary), qwen3.5-plus (fast scenario fallback)]
+	// Chain: [claude-sonnet-4.5 (override), kimi-k2.5 (default fallback),
+	//         qwen3.6-plus (fast scenario primary), qwen3.7-plus (fast scenario fallback)]
 	chain, _, _ := h.buildModelChain("claude-sonnet-4.5", nil, 100, true)
-	want := []string{"claude-sonnet-4.5", "mimo-v2-pro", "qwen3.6-plus", "qwen3.5-plus"}
+	want := []string{"claude-sonnet-4.5", "kimi-k2.5", "qwen3.6-plus", "qwen3.7-plus"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
 		t.Errorf("streaming chain = %v, want %v (safety-net should use RouteForStreaming)", got, want)
 	}
@@ -305,7 +305,7 @@ func TestBuildModelChain_UnknownModel_FallsThroughToScenarioRoute(t *testing.T) 
 			"default": {Provider: "opencode-go", ModelID: "kimi-k2.6"},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "mimo-v2-pro"}},
+			"default": {{ModelID: "kimi-k2.5"}},
 		},
 		ModelOverrides: map[string]config.ModelConfig{
 			"some-other-model": {Provider: "opencode-zen", ModelID: "some-other-model"},
@@ -317,7 +317,7 @@ func TestBuildModelChain_UnknownModel_FallsThroughToScenarioRoute(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []string{"kimi-k2.6", "mimo-v2-pro"}
+	want := []string{"kimi-k2.6", "kimi-k2.5"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
 		t.Errorf("chain = %v, want %v", got, want)
 	}

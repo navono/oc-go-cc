@@ -61,6 +61,40 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// HandleModels handles GET /v1/models.
+// Returns the list of available OpenCode Go models in Anthropic model listing format.
+func (h *HealthHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
+	type modelEntry struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		CreatedAt   string `json:"created_at"`
+	}
+
+	models := []modelEntry{
+		{ID: "glm-5.1", DisplayName: "GLM-5.1", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "glm-5", DisplayName: "GLM-5", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "kimi-k2.6", DisplayName: "Kimi K2.6", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "kimi-k2.5", DisplayName: "Kimi K2.5", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "mimo-v2.5-pro", DisplayName: "MiMo-V2.5-Pro", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "mimo-v2.5", DisplayName: "MiMo-V2.5", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "deepseek-v4-pro", DisplayName: "DeepSeek V4 Pro", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "deepseek-v4-flash", DisplayName: "DeepSeek V4 Flash", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "minimax-m3", DisplayName: "MiniMax M3", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "minimax-m2.7", DisplayName: "MiniMax M2.7", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "minimax-m2.5", DisplayName: "MiniMax M2.5", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "qwen3.7-max", DisplayName: "Qwen3.7 Max", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "qwen3.7-plus", DisplayName: "Qwen3.7 Plus", CreatedAt: "2025-01-01T00:00:00Z"},
+		{ID: "qwen3.6-plus", DisplayName: "Qwen3.6 Plus", CreatedAt: "2025-01-01T00:00:00Z"},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": models,
+	})
+}
+
 // HandleCountTokens handles POST /v1/messages/count_tokens.
 func (h *HealthHandler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

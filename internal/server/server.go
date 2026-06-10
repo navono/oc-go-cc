@@ -67,6 +67,7 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	// API routes.
 	mux.HandleFunc("/v1/messages", messagesHandler.HandleMessages)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
+	mux.HandleFunc("/v1/models", healthHandler.HandleModels)
 	mux.HandleFunc("/health", healthHandler.HandleHealth)
 
 	// Create HTTP server.

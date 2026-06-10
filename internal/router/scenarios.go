@@ -49,7 +49,7 @@ func DetectScenario(messages []MessageContent, tokenCount int, cfg *config.Confi
 		return ScenarioResult{
 			Scenario:   ScenarioLongContext,
 			TokenCount: tokenCount,
-			Reason:     fmt.Sprintf("token count %d exceeds threshold %d (use MiniMax for 1M context)", tokenCount, threshold),
+			Reason:     fmt.Sprintf("token count %d exceeds threshold %d (use MiniMax M3 for 1M context)", tokenCount, threshold),
 		}
 	}
 
@@ -76,7 +76,7 @@ func DetectScenario(messages []MessageContent, tokenCount int, cfg *config.Confi
 		return ScenarioResult{
 			Scenario:   ScenarioBackground,
 			TokenCount: tokenCount,
-			Reason:     "simple background task detected (use Qwen3.5 Plus)",
+			Reason:     "simple background task detected (use Qwen3.7 Plus)",
 		}
 	}
 

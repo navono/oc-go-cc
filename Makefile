@@ -39,7 +39,7 @@ install: build
 
 docker-up:
 	@echo "Building Docker image..."
-	docker build -t oc-go-cc .
+	docker build --network=host --build-arg HTTP_PROXY=http://127.0.0.1:18899 --build-arg HTTPS_PROXY=http://127.0.0.1:18899 -t oc-go-cc .
 	@echo ""
 	@echo "Starting container..."
 	@if [ ! -f .env ]; then \
@@ -59,7 +59,7 @@ docker-up:
 	@echo "Container started! Proxy listening on http://localhost:3456"
 	@echo "Stop with:  make docker-stop"
 
-docker-stop:
+docker-down:
 	@echo "Stopping container..."
 	docker stop oc-go-cc 2>/dev/null || true
 	docker rm oc-go-cc 2>/dev/null || true

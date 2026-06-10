@@ -24,17 +24,17 @@ Run a single test: `go test ./internal/router/ -v`
 
 **Two API endpoints:**
 
-- OpenAI endpoint (`/v1/chat/completions`) — used by most models (GLM, Kimi, MiMo, Qwen)
-- Anthropic endpoint (`/v1/messages`) — used only by MiniMax models
+- OpenAI endpoint (`/v1/chat/completions`) — used by GLM, Kimi, MiMo, DeepSeek
+- Anthropic endpoint (`/v1/messages`) — used by MiniMax and Qwen models
 
 `internal/client/opencode.go` routes by model ID via `IsAnthropicModel()`.
 
 **Scenario detection priority** (`internal/router/scenarios.go`):
 
-1. Long Context (>80K tokens, configurable) → MiniMax (1M context)
+1. Long Context (>80K tokens, configurable) → MiniMax M3 (1M context)
 2. Complex (architectural patterns, tool operations) → GLM-5.1
 3. Think (reasoning keywords in system prompt) → GLM-5
-4. Background (simple read-only ops, no tools) → Qwen3.5 Plus
+4. Background (simple read-only ops, no tools) → Qwen3.7 Plus
 5. Default → Kimi K2.6
 
 For streaming, the router downgrades to fast models (Qwen3.6 Plus) for better TTFT.

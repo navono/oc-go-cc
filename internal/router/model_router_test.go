@@ -28,7 +28,7 @@ func TestRoute_RespectRequestedModel_BypassesScenarioRouting(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "qwen3.5-plus"},
+				{Provider: "opencode-go", ModelID: "qwen3.7-plus"},
 			},
 		},
 	}
@@ -66,7 +66,7 @@ func TestRoute_RespectRequestedModel_False_UsesScenarioRouting(t *testing.T) {
 			"complex": {ModelID: "glm-5.1"},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "qwen3.5-plus"}},
+			"default": {{ModelID: "qwen3.7-plus"}},
 		},
 	}
 
@@ -93,7 +93,7 @@ func TestRoute_RespectRequestedModel_EmptyModel_FallsThrough(t *testing.T) {
 			"default": {ModelID: "kimi-k2.6"},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "qwen3.5-plus"}},
+			"default": {{ModelID: "qwen3.7-plus"}},
 		},
 	}
 
@@ -125,7 +125,7 @@ func TestRoute_RespectRequestedModel_UnknownModel_UsesDefaults(t *testing.T) {
 			},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "qwen3.5-plus"}},
+			"default": {{ModelID: "qwen3.7-plus"}},
 		},
 	}
 
@@ -162,7 +162,7 @@ func TestRouteForStreaming_RespectRequestedModel_BypassesScenarioRouting(t *test
 			},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "qwen3.5-plus"}},
+			"default": {{ModelID: "qwen3.7-plus"}},
 		},
 	}
 
@@ -188,7 +188,7 @@ func TestRouteForStreaming_RespectRequestedModel_False_UsesScenarioRouting(t *te
 			"default": {ModelID: "qwen3.6-plus"},
 		},
 		Fallbacks: map[string][]config.ModelConfig{
-			"default": {{ModelID: "qwen3.5-plus"}},
+			"default": {{ModelID: "qwen3.7-plus"}},
 		},
 	}
 
@@ -213,7 +213,7 @@ func TestResolveRequestedModel_UsesFallbacks(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "qwen3.5-plus"},
+				{Provider: "opencode-go", ModelID: "qwen3.7-plus"},
 				{Provider: "opencode-go", ModelID: "glm-5.1"},
 			},
 		},
@@ -228,8 +228,8 @@ func TestResolveRequestedModel_UsesFallbacks(t *testing.T) {
 	if len(result.Fallbacks) != 2 {
 		t.Errorf("expected 2 fallbacks, got %d", len(result.Fallbacks))
 	}
-	if result.Fallbacks[0].ModelID != "qwen3.5-plus" {
-		t.Errorf("expected first fallback qwen3.5-plus, got %s", result.Fallbacks[0].ModelID)
+	if result.Fallbacks[0].ModelID != "qwen3.7-plus" {
+		t.Errorf("expected first fallback qwen3.7-plus, got %s", result.Fallbacks[0].ModelID)
 	}
 }
 
@@ -245,7 +245,7 @@ func TestRouteWithOverride_MatchesKey(t *testing.T) {
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"kimi-k2.6": {
-				{Provider: "opencode-go", ModelID: "qwen3.5-plus"},
+				{Provider: "opencode-go", ModelID: "qwen3.7-plus"},
 			},
 		},
 	}
@@ -265,8 +265,8 @@ func TestRouteWithOverride_MatchesKey(t *testing.T) {
 	if result.Scenario != ScenarioOverride {
 		t.Errorf("expected ScenarioOverride, got %s", result.Scenario)
 	}
-	if len(result.Fallbacks) != 1 || result.Fallbacks[0].ModelID != "qwen3.5-plus" {
-		t.Errorf("expected single fallback qwen3.5-plus, got %+v", result.Fallbacks)
+	if len(result.Fallbacks) != 1 || result.Fallbacks[0].ModelID != "qwen3.7-plus" {
+		t.Errorf("expected single fallback qwen3.7-plus, got %+v", result.Fallbacks)
 	}
 }
 
@@ -302,8 +302,8 @@ func TestRouteWithOverride_MissingFallbacksKey_FallsBackToDefault(t *testing.T) 
 		},
 		Fallbacks: map[string][]config.ModelConfig{
 			"default": {
-				{Provider: "opencode-go", ModelID: "qwen3.5-plus"},
-				{Provider: "opencode-go", ModelID: "mimo-v2-pro"},
+				{Provider: "opencode-go", ModelID: "qwen3.7-plus"},
+				{Provider: "opencode-go", ModelID: "kimi-k2.5"},
 			},
 		},
 		// No entry in Fallbacks for "kimi-k2.6" — should fall back to
@@ -319,8 +319,8 @@ func TestRouteWithOverride_MissingFallbacksKey_FallsBackToDefault(t *testing.T) 
 	if len(result.Fallbacks) != 2 {
 		t.Fatalf("expected 2 default fallbacks, got %d: %+v", len(result.Fallbacks), result.Fallbacks)
 	}
-	if result.Fallbacks[0].ModelID != "qwen3.5-plus" || result.Fallbacks[1].ModelID != "mimo-v2-pro" {
-		t.Errorf("expected default fallbacks [qwen3.5-plus, mimo-v2-pro], got %+v", result.Fallbacks)
+	if result.Fallbacks[0].ModelID != "qwen3.7-plus" || result.Fallbacks[1].ModelID != "kimi-k2.5" {
+		t.Errorf("expected default fallbacks [qwen3.7-plus, kimi-k2.5], got %+v", result.Fallbacks)
 	}
 	chain := result.GetModelChain()
 	if len(chain) != 3 {

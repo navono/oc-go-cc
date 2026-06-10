@@ -24,13 +24,13 @@ Override with `OC_GO_CC_CONFIG` environment variable.
     },
     "background": {
       "provider": "opencode-go",
-      "model_id": "qwen3.5-plus",
+      "model_id": "qwen3.7-plus",
       "temperature": 0.5,
       "max_tokens": 2048
     },
     "think": {
       "provider": "opencode-go",
-      "model_id": "glm-5.1",
+      "model_id": "glm-5",
       "temperature": 0.7,
       "max_tokens": 8192
     },
@@ -42,7 +42,7 @@ Override with `OC_GO_CC_CONFIG` environment variable.
     },
     "long_context": {
       "provider": "opencode-go",
-      "model_id": "minimax-m2.7",
+      "model_id": "minimax-m3",
       "temperature": 0.7,
       "max_tokens": 16384,
       "context_threshold": 80000
@@ -56,14 +56,30 @@ Override with `OC_GO_CC_CONFIG` environment variable.
   },
 
   "fallbacks": {
+    "background": [
+      { "provider": "opencode-go", "model_id": "qwen3.6-plus" },
+      { "provider": "opencode-go", "model_id": "minimax-m2.5" }
+    ],
     "default": [
-      { "provider": "opencode-go", "model_id": "glm-5" },
+      { "provider": "opencode-go", "model_id": "kimi-k2.5" },
       { "provider": "opencode-go", "model_id": "qwen3.6-plus" }
     ],
-    "think": [{ "provider": "opencode-go", "model_id": "glm-5" }],
-    "complex": [{ "provider": "opencode-go", "model_id": "glm-5" }],
-    "long_context": [{ "provider": "opencode-go", "model_id": "minimax-m2.5" }],
-    "fast": [{ "provider": "opencode-go", "model_id": "qwen3.5-plus" }]
+    "long_context": [
+      { "provider": "opencode-go", "model_id": "minimax-m2.7" },
+      { "provider": "opencode-go", "model_id": "minimax-m2.5" }
+    ],
+    "think": [
+      { "provider": "opencode-go", "model_id": "deepseek-v4-flash" },
+      { "provider": "opencode-go", "model_id": "kimi-k2.6" }
+    ],
+    "complex": [
+      { "provider": "opencode-go", "model_id": "glm-5" },
+      { "provider": "opencode-go", "model_id": "kimi-k2.6" }
+    ],
+    "fast": [
+      { "provider": "opencode-go", "model_id": "deepseek-v4-flash" },
+      { "provider": "opencode-go", "model_id": "minimax-m2.5" }
+    ]
   },
 
   "model_overrides": {
@@ -152,11 +168,11 @@ The proxy automatically detects the type of request and routes to the appropriat
 
 | Scenario         | Trigger                                             | Model        | Why                                             |
 | ---------------- | --------------------------------------------------- | ------------ | ----------------------------------------------- |
-| **Long Context** | >80K tokens (configurable)                          | MiniMax M2.7 | 1M context window vs 128-256K for others        |
+| **Long Context** | >80K tokens (configurable)                          | MiniMax M3   | 1M context window vs 128-256K for others        |
 | **Complex**      | "architect", "refactor", "complex" in system prompt | GLM-5.1      | Best reasoning & architectural understanding    |
 | **Think**        | "think", "plan", "reason" in system prompt          | GLM-5        | Good reasoning, cheaper than GLM-5.1            |
-| **Background**   | "read file", "grep", "list directory"               | Qwen3.5 Plus | Cheapest (~10K req/5hr), perfect for simple ops |
-| **Default**      | Everything else                                     | Kimi K2.6    | Best balance of quality & cost (~1.8K req/5hr)  |
+| **Background**   | "read file", "grep", "list directory"               | Qwen3.7 Plus | Cost-effective, perfect for simple ops           |
+| **Default**      | Everything else                                     | Kimi K2.6    | Best balance of quality & cost                   |
 
 **See [MODELS.md](MODELS.md) for detailed model capabilities, costs, and routing recommendations.**
 
@@ -167,9 +183,9 @@ DeepSeek V4 users can set any scenario model to `deepseek-v4-pro` or `deepseek-v
 | Scenario         | Trigger                                                                      | Config Key            | Default Model  |
 | ---------------- | ---------------------------------------------------------------------------- | --------------------- | -------------- |
 | **Default**      | Standard chat                                                                | `models.default`      | `kimi-k2.6`    |
-| **Think**        | System prompt contains "think", "plan", "reason"; or thinking content blocks | `models.think`        | `glm-5.1`      |
-| **Long Context** | Token count exceeds `context_threshold`                                      | `models.long_context` | `minimax-m2.7` |
-| **Background**   | File read, directory list, grep patterns                                     | `models.background`   | `qwen3.5-plus` |
+| **Think**        | System prompt contains "think", "plan", "reason"; or thinking content blocks | `models.think`        | `glm-5`        |
+| **Long Context** | Token count exceeds `context_threshold`                                      | `models.long_context` | `minimax-m3`   |
+| **Background**   | File read, directory list, grep patterns                                     | `models.background`   | `qwen3.7-plus` |
 
 Routing priority: **Long Context** > **Think** > **Background** > **Default**
 

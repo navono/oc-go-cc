@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -8,8 +8,8 @@ RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=docker" -o /app/oc-go
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata wget && \
     addgroup -S appgroup && adduser -S appuser -G appgroup && \
-    mkdir -p /etc/oc-go-cc && \
-    chown -R appuser:appgroup /etc/oc-go-cc
+    mkdir -p /etc/oc-go-cc /home/appuser/.config/oc-go-cc && \
+    chown -R appuser:appgroup /etc/oc-go-cc /home/appuser/.config/oc-go-cc
 
 COPY --from=builder /app/oc-go-cc /usr/local/bin/oc-go-cc
 COPY --from=builder /app/configs/config.example.json /etc/oc-go-cc/config.json
