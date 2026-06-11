@@ -394,7 +394,7 @@ func (h *MessagesHandler) handleStreaming(
 			endpointType := client.ClassifyEndpoint(model.ModelID)
 			switch endpointType {
 			case client.EndpointAnthropic:
-				modelBody := replaceModelInRawBody(rawBody, model.ModelID)
+				modelBody := replaceModelInRawBody(sanitizeToolsInRawBody(rawBody), model.ModelID)
 				if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model, stickyKey); err != nil {
 					cancel()
 					if clientCtx.Err() == context.Canceled {
@@ -553,6 +553,68 @@ func (h *MessagesHandler) handleGeminiStreaming(
 	return nil
 }
 
+// sanitizeToolsInRawBody removes tools with empty names or empty input_schema
+// from the raw request body. Some providers (e.g. MiniMax) reject requests
+// that contain tool definitions with missing name or parameters.
+func sanitizeToolsInRawBody(rawBody json.RawMessage) json.RawMessage {
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		return rawBody
+	}
+
+	toolsRaw, ok := body["tools"]
+	if !ok {
+		return rawBody
+	}
+
+	var tools []json.RawMessage
+	if err := json.Unmarshal(toolsRaw, &tools); err != nil {
+		return rawBody
+	}
+
+	var filtered []json.RawMessage
+	for _, t := range tools {
+		var tool struct {
+			Name        string          `json:"name"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		}
+		if err := json.Unmarshal(t, &tool); err != nil {
+			continue // skip unparseable tools
+		}
+		if tool.Name == "" {
+			slog.Debug("sanitized: removed tool with empty name")
+			continue
+		}
+		if len(tool.InputSchema) == 0 || string(tool.InputSchema) == "{}" {
+			slog.Debug("sanitized: removed tool with empty input_schema", "name", tool.Name)
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+
+	if len(filtered) == len(tools) {
+		return rawBody // nothing removed
+	}
+
+	slog.Info("sanitized tools in request body",
+		"before", len(tools),
+		"after", len(filtered),
+	)
+
+	if len(filtered) == 0 {
+		delete(body, "tools")
+	} else {
+		filteredRaw, _ := json.Marshal(filtered)
+		body["tools"] = filteredRaw
+	}
+
+	result, err := json.Marshal(body)
+	if err != nil {
+		return rawBody
+	}
+	return json.RawMessage(result)
+}
+
 // replaceModelInRawBody replaces the model field in raw JSON body with the actual model ID.
 func replaceModelInRawBody(rawBody json.RawMessage, modelID string) json.RawMessage {
 	bodyStr := string(rawBody)
@@ -647,7 +709,7 @@ func (h *MessagesHandler) handleNonStreaming(
 				endpointType := client.ClassifyEndpoint(model.ModelID)
 				switch endpointType {
 				case client.EndpointAnthropic:
-					return h.executeAnthropicRequest(ctx, rawBody, model, stickyKey)
+					return h.executeAnthropicRequest(ctx, sanitizeToolsInRawBody(rawBody), model, stickyKey)
 				case client.EndpointResponses:
 					return h.executeResponsesRequest(ctx, anthropicReq, model, stickyKey)
 				case client.EndpointGemini:
@@ -657,7 +719,7 @@ func (h *MessagesHandler) handleNonStreaming(
 				}
 			} else if client.IsAnthropicModel(model.ModelID) {
 				// Go provider Anthropic-native models (MiniMax, Qwen)
-				return h.executeAnthropicRequest(ctx, rawBody, model, stickyKey)
+				return h.executeAnthropicRequest(ctx, sanitizeToolsInRawBody(rawBody), model, stickyKey)
 			}
 
 			// OpenAI-compatible models (both Go and Zen)
