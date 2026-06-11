@@ -139,6 +139,10 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Sanitize tools — remove entries with empty name or empty input_schema.
+	// Some providers (e.g. MiniMax) reject requests containing such definitions.
+	anthropicReq.Tools = sanitizeTools(anthropicReq.Tools)
+
 	// Record metrics
 	isStreaming := anthropicReq.Stream != nil && *anthropicReq.Stream
 	h.metrics.RecordRequest(isStreaming)
@@ -445,6 +449,23 @@ func (h *MessagesHandler) handleStreaming(
 			default:
 				// Fall through to OpenAI-compatible handling
 			}
+		} else if client.IsAnthropicModel(model.ModelID) {
+			// Go provider Anthropic-native models (MiniMax, Qwen) — use Anthropic endpoint
+			modelBody := replaceModelInRawBody(sanitizeToolsInRawBody(rawBody), model.ModelID)
+			if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model, stickyKey); err != nil {
+				cancel()
+				if clientCtx.Err() == context.Canceled {
+					h.logger.Info("client disconnected during anthropic stream")
+					return
+				}
+				h.logger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
+				continue
+			}
+			cancel()
+			latency := time.Since(streamStart)
+			h.metrics.RecordSuccess(model.ModelID, latency)
+			h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+			return
 		}
 
 		// OpenAI-compatible models (both Go and Zen)
@@ -863,6 +884,33 @@ func extractTextFromBlocks(blocks []types.ContentBlock) string {
 		}
 	}
 	return content
+}
+
+// sanitizeTools removes tool definitions with empty names or empty input_schema.
+// Some providers (e.g. MiniMax) reject requests containing such invalid tools.
+func sanitizeTools(tools []types.Tool) []types.Tool {
+	if len(tools) == 0 {
+		return tools
+	}
+	filtered := make([]types.Tool, 0, len(tools))
+	for _, t := range tools {
+		if t.Name == "" {
+			slog.Debug("sanitized: removed tool with empty name")
+			continue
+		}
+		if len(t.InputSchema) == 0 || string(t.InputSchema) == "{}" {
+			slog.Debug("sanitized: removed tool with empty input_schema", "name", t.Name)
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	if len(filtered) != len(tools) {
+		slog.Info("sanitized tools", "before", len(tools), "after", len(filtered))
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // sendError sends an error response in Anthropic format.
