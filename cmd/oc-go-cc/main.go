@@ -91,12 +91,16 @@ func serveCmd() *cobra.Command {
 			// Check if already running before writing this process' PID.
 			if !daemonize {
 				if pid, err := daemon.GetPID(pidPath); err == nil {
-					// Check if process is still running.
-					if daemon.IsProcessRunning(pid) {
+					if pid == os.Getpid() {
+						// Stale PID file from a previous run with the same PID
+						// (e.g. Docker container restart where PID is always 1).
+						_ = os.Remove(pidPath)
+					} else if daemon.IsProcessRunning(pid) {
 						return fmt.Errorf("server is already running (PID %d)", pid)
+					} else {
+						// Stale PID file, clean up.
+						_ = os.Remove(pidPath)
 					}
-					// Stale PID file, clean up.
-					_ = os.Remove(pidPath)
 				}
 			}
 
