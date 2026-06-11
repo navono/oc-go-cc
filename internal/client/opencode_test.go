@@ -23,6 +23,11 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "minimax m3 uses anthropic endpoint",
+			modelID: "minimax-m3",
+			want:    true,
+		},
+		{
 			name:    "deepseek pro uses openai endpoint",
 			modelID: "deepseek-v4-pro",
 			want:    false,
@@ -41,6 +46,61 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 			name:    "glm-5.1 uses openai endpoint",
 			modelID: "glm-5.1",
 			want:    false,
+		},
+		{
+			name:    "kimi-k2.5 uses openai endpoint",
+			modelID: "kimi-k2.5",
+			want:    false,
+		},
+		{
+			name:    "mimo-v2.5 uses openai endpoint",
+			modelID: "mimo-v2.5",
+			want:    false,
+		},
+		{
+			name:    "mimo-v2.5-pro uses openai endpoint",
+			modelID: "mimo-v2.5-pro",
+			want:    false,
+		},
+		{
+			name:    "qwen3.5-plus uses anthropic endpoint",
+			modelID: "qwen3.5-plus",
+			want:    true,
+		},
+		{
+			name:    "qwen3.6-plus uses anthropic endpoint",
+			modelID: "qwen3.6-plus",
+			want:    true,
+		},
+		{
+			name:    "qwen3.7-plus uses anthropic endpoint",
+			modelID: "qwen3.7-plus",
+			want:    true,
+		},
+		{
+			name:    "qwen3.7-max uses anthropic endpoint",
+			modelID: "qwen3.7-max",
+			want:    true,
+		},
+		{
+			name:    "claude-sonnet-4-5 uses anthropic endpoint",
+			modelID: "claude-sonnet-4-5",
+			want:    true,
+		},
+		{
+			name:    "claude-opus-4-7 uses anthropic endpoint",
+			modelID: "claude-opus-4-7",
+			want:    true,
+		},
+		{
+			name:    "claude-haiku-4-5 uses anthropic endpoint",
+			modelID: "claude-haiku-4-5",
+			want:    true,
+		},
+		{
+			name:    "claude-3-5-haiku uses anthropic endpoint",
+			modelID: "claude-3-5-haiku",
+			want:    true,
 		},
 	}
 
@@ -124,13 +184,33 @@ func TestClassifyEndpoint(t *testing.T) {
 		expected EndpointType
 	}{
 		{
-			name:     "minimax m2.5 uses anthropic endpoint",
+			name:     "minimax m2.5 uses chat completions on Zen",
 			modelID:  "minimax-m2.5",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "minimax m2.7 uses chat completions on Zen",
+			modelID:  "minimax-m2.7",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "minimax m3 uses chat completions on Zen",
+			modelID:  "minimax-m3",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "qwen3.5-plus uses anthropic endpoint",
+			modelID:  "qwen3.5-plus",
 			expected: EndpointAnthropic,
 		},
 		{
-			name:     "minimax m2.7 uses anthropic endpoint",
-			modelID:  "minimax-m2.7",
+			name:     "qwen3.6-plus uses anthropic endpoint",
+			modelID:  "qwen3.6-plus",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "qwen3.7-plus uses anthropic endpoint",
+			modelID:  "qwen3.7-plus",
 			expected: EndpointAnthropic,
 		},
 		{
@@ -174,6 +254,21 @@ func TestClassifyEndpoint(t *testing.T) {
 			expected: EndpointChatCompletions,
 		},
 		{
+			name:     "kimi-k2.5 uses chat completions endpoint",
+			modelID:  "kimi-k2.5",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "mimo-v2.5 uses chat completions endpoint",
+			modelID:  "mimo-v2.5",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "mimo-v2.5-pro uses chat completions endpoint",
+			modelID:  "mimo-v2.5-pro",
+			expected: EndpointChatCompletions,
+		},
+		{
 			name:     "glm-5.1 uses chat completions endpoint",
 			modelID:  "glm-5.1",
 			expected: EndpointChatCompletions,
@@ -182,6 +277,41 @@ func TestClassifyEndpoint(t *testing.T) {
 			name:     "deepseek-v4-flash uses chat completions endpoint",
 			modelID:  "deepseek-v4-flash",
 			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "grok-build-0.1 uses chat completions endpoint",
+			modelID:  "grok-build-0.1",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "big-pickle uses chat completions endpoint",
+			modelID:  "big-pickle",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "north-mini-code-free uses chat completions endpoint",
+			modelID:  "north-mini-code-free",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "deepseek-v4-flash-free uses chat completions endpoint",
+			modelID:  "deepseek-v4-flash-free",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "claude-sonnet-4-5 uses anthropic endpoint",
+			modelID:  "claude-sonnet-4-5",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "claude-opus-4-7 uses anthropic endpoint",
+			modelID:  "claude-opus-4-7",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "claude-haiku-4-5 uses anthropic endpoint",
+			modelID:  "claude-haiku-4-5",
+			expected: EndpointAnthropic,
 		},
 		{
 			name:     "unknown model uses chat completions endpoint",
