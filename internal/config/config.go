@@ -12,6 +12,8 @@ type Config struct {
 	HotReload                      bool                     `json:"hot_reload"`
 	EnableStreamingScenarioRouting bool                     `json:"enable_streaming_scenario_routing"`
 	RespectRequestedModel          bool                     `json:"respect_requested_model"`
+	StickyKeyEnabled               bool                     `json:"sticky_key_enabled"`
+	StickyKeyMappings              map[string]int           `json:"sticky_key_mappings"`
 	Models                         map[string]ModelConfig   `json:"models"`
 	Fallbacks                      map[string][]ModelConfig `json:"fallbacks"`
 	ModelOverrides                 map[string]ModelConfig   `json:"model_overrides"`

@@ -1,4 +1,4 @@
-.PHONY: build run test clean install dist lint vet docker-up docker-stop
+.PHONY: build run test clean install dist lint vet docker-up docker-down docker-logs docker-restart
 
 # Build variables
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -35,35 +35,31 @@ install: build
 		cp bin/$(BINARY) $(HOME)/go/bin/$(BINARY) 2>/dev/null || \
 		go install -ldflags "$(LDFLAGS)" $(CMD)
 
-# ── Docker ─────────────────────────────────────────────────────────
+# ── Docker (compose) ────────────────────────────────────────────────
 
 docker-up:
-	@echo "Building Docker image..."
-	docker build --network=host --build-arg HTTP_PROXY=http://127.0.0.1:18899 --build-arg HTTPS_PROXY=http://127.0.0.1:18899 -t oc-go-cc .
-	@echo ""
-	@echo "Starting container..."
-	@if [ ! -f .env ]; then \
-		echo "ERROR: .env file not found."; \
-		echo "Create it with: cp .env.example .env"; \
-		exit 1; \
+	@if [ ! -f .env ]; then echo "ERROR: .env not found. Create it with: cp .env.example .env"; exit 1; fi
+	@mkdir -p .tmp/tiktoken-cache
+	@if [ ! -f .tmp/tiktoken-cache/9b5ad71b2ce5302211f9c61530b329a4922fc6a4 ]; then \
+		echo "Downloading tiktoken encoding..."; \
+		wget -q -O .tmp/tiktoken-cache/9b5ad71b2ce5302211f9c61530b329a4922fc6a4 \
+			https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken; \
 	fi
-	@docker stop oc-go-cc 2>/dev/null || true
-	@docker rm oc-go-cc 2>/dev/null || true
-	docker run -d \
-			--name oc-go-cc \
-			--restart unless-stopped \
-			--env-file .env \
-			-p 3456:3456 \
-			oc-go-cc
+	DOCKER_BUILDKIT=1 docker compose up -d --build
 	@echo ""
 	@echo "Container started! Proxy listening on http://localhost:3456"
-	@echo "Stop with:  make docker-stop"
+	@echo "Logs:      make docker-logs"
+	@echo "Stop:      make docker-down"
+	@echo "Restart:   make docker-restart"
 
 docker-down:
-	@echo "Stopping container..."
-	docker stop oc-go-cc 2>/dev/null || true
-	docker rm oc-go-cc 2>/dev/null || true
-	@echo "Container stopped and removed."
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
+
+docker-restart:
+	docker compose restart
 
 # ── Release / Cross-Compilation ────────────────────────────────────
 

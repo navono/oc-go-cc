@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"testing"
 
 	"oc-go-cc/internal/config"
@@ -399,7 +400,7 @@ func TestNextAPIKey_RoundRobin(t *testing.T) {
 	// With 3 keys, iteration 0..5 should cycle key-a, key-b, key-c, key-a, key-b, key-c
 	expected := []string{"key-a", "key-b", "key-c", "key-a", "key-b", "key-c"}
 	for i, want := range expected {
-		if got := c.nextAPIKey(cfg.EffectiveAPIKeys()); got != want {
+		if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), ""); got != want {
 			t.Errorf("iteration %d: nextAPIKey() = %q, want %q", i, got, want)
 		}
 	}
@@ -411,7 +412,7 @@ func TestNextAPIKey_SingleKey(t *testing.T) {
 	c := &OpenCodeClient{atomic: atomicCfg}
 
 	for i := 0; i < 5; i++ {
-		if got := c.nextAPIKey(cfg.EffectiveAPIKeys()); got != "single" {
+		if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), ""); got != "single" {
 			t.Errorf("iteration %d: nextAPIKey() = %q, want %q", i, got, "single")
 		}
 	}
@@ -422,7 +423,7 @@ func TestNextAPIKey_EmptyKeys(t *testing.T) {
 	atomicCfg := config.NewAtomicConfig(cfg, "")
 	c := &OpenCodeClient{atomic: atomicCfg}
 
-	if got := c.nextAPIKey(cfg.EffectiveAPIKeys()); got != "" {
+	if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), ""); got != "" {
 		t.Errorf("nextAPIKey() = %q, want empty string", got)
 	}
 }
@@ -441,7 +442,7 @@ func TestNextAPIKey_ConcurrentSafety(t *testing.T) {
 	for g := 0; g < goroutines; g++ {
 		go func() {
 			for i := 0; i < callsPerGoroutine; i++ {
-				results <- c.nextAPIKey(cfg.EffectiveAPIKeys())
+				results <- c.nextAPIKey(cfg.EffectiveAPIKeys(), "")
 			}
 		}()
 	}
@@ -459,5 +460,212 @@ func TestNextAPIKey_ConcurrentSafety(t *testing.T) {
 		if seen[key] != expectedPerKey {
 			t.Errorf("key %q seen %d times, want %d", key, seen[key], expectedPerKey)
 		}
+	}
+}
+
+// TestNextAPIKey_StickyDeterminism verifies that a non-empty sticky key
+// always resolves to the same upstream key across many invocations.
+func TestNextAPIKey_StickyDeterminism(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"key-a", "key-b", "key-c"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	first := c.nextAPIKey(cfg.EffectiveAPIKeys(), "token-X")
+	for i := 0; i < 100; i++ {
+		if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), "token-X"); got != first {
+			t.Errorf("iteration %d: sticky nextAPIKey drifted: got %q, want %q", i, got, first)
+		}
+	}
+}
+
+// TestNextAPIKey_StickyDistribution verifies that a 3-key pool, fed many
+// distinct tokens, hits more than one key (so hashing is not constant) and
+// each token's key matches the FNV-1a index helper.
+func TestNextAPIKey_StickyDistribution(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"key-a", "key-b", "key-c"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	seen := make(map[string]struct{})
+	for i := 0; i < 32; i++ {
+		token := fmt.Sprintf("token-%d", i)
+		want := cfg.APIKeys[stickyKeyIndex(token, uint64(len(cfg.APIKeys)))]
+		got := c.nextAPIKey(cfg.EffectiveAPIKeys(), token)
+		if got != want {
+			t.Errorf("token %q: got %q, want %q (index helper mismatch)", token, got, want)
+		}
+		seen[got] = struct{}{}
+	}
+	if len(seen) < 2 {
+		t.Errorf("expected sticky hashing to map 32 tokens onto at least 2 keys; saw %d", len(seen))
+	}
+}
+
+// TestNextAPIKey_StickyEmptyFallsBackToRoundRobin verifies that an empty
+// sticky key preserves the original round-robin cycle (backward compatibility
+// for callers that haven't opted into sticky routing).
+func TestNextAPIKey_StickyEmptyFallsBackToRoundRobin(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"key-a", "key-b", "key-c"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	expected := []string{"key-a", "key-b", "key-c", "key-a", "key-b", "key-c"}
+	for i, want := range expected {
+		if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), ""); got != want {
+			t.Errorf("iteration %d: got %q, want %q", i, got, want)
+		}
+	}
+}
+
+// TestNextAPIKey_StickySingleKeyPool verifies that a 1-key pool always
+// returns that key regardless of the sticky token.
+func TestNextAPIKey_StickySingleKeyPool(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"only"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	for _, token := range []string{"", "alpha", "beta", "anything"} {
+		if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), token); got != "only" {
+			t.Errorf("token %q: got %q, want %q", token, got, "only")
+		}
+	}
+}
+
+// TestNextAPIKey_StickyNoInteractionWithCounter verifies that interleaving
+// sticky and round-robin calls in one client does not break either path:
+// sticky calls are deterministic, "" calls still advance the counter.
+func TestNextAPIKey_StickyNoInteractionWithCounter(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"k1", "k2", "k3"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	// Two sticky calls first — must pick the same key for "alpha".
+	const token = "alpha"
+	want := cfg.APIKeys[stickyKeyIndex(token, uint64(len(cfg.APIKeys)))]
+	if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), token); got != want {
+		t.Fatalf("alpha first: got %q, want %q", got, want)
+	}
+	if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), token); got != want {
+		t.Fatalf("alpha second: got %q, want %q", got, want)
+	}
+	// Now drain the counter with three "" calls. Order is implementation-
+	// defined but each key must appear exactly once.
+	got := []string{
+		c.nextAPIKey(cfg.EffectiveAPIKeys(), ""),
+		c.nextAPIKey(cfg.EffectiveAPIKeys(), ""),
+		c.nextAPIKey(cfg.EffectiveAPIKeys(), ""),
+	}
+	seen := make(map[string]bool)
+	for _, k := range got {
+		if seen[k] {
+			t.Errorf("counter walk produced duplicate key %q in %v", k, got)
+		}
+		seen[k] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("expected 3 distinct keys in counter walk, got %v", got)
+	}
+	// Sticky call afterwards is still deterministic.
+	if got := c.nextAPIKey(cfg.EffectiveAPIKeys(), token); got != want {
+		t.Errorf("alpha post-counter: got %q, want %q", got, want)
+	}
+}
+
+// TestResolveAPIKey_ExactMappingWins verifies that an explicit token->index
+// mapping in config is honored verbatim, regardless of what the FNV-1a hash
+// would have produced for the same token.
+func TestResolveAPIKey_ExactMappingWins(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"sk-alice", "sk-bob", "sk-carol"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	mappings := map[string]int{
+		"customerA-token": 0, // -> sk-alice
+		"customerB-token": 1, // -> sk-bob
+		"customerC-token": 2, // -> sk-carol
+	}
+
+	cases := []struct {
+		token string
+		want  string
+	}{
+		{"customerA-token", "sk-alice"},
+		{"customerB-token", "sk-bob"},
+		{"customerC-token", "sk-carol"},
+	}
+	for _, tc := range cases {
+		if got := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), tc.token, mappings); got != tc.want {
+			t.Errorf("token %q: got %q, want %q (explicit mapping should win)", tc.token, got, tc.want)
+		}
+	}
+}
+
+// TestResolveAPIKey_MappingMissFallsBackToHash verifies that an unmapped
+// token still gets stable bucketing via FNV-1a.
+func TestResolveAPIKey_MappingMissFallsBackToHash(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"sk-alice", "sk-bob", "sk-carol"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	mappings := map[string]int{"customerA-token": 0}
+
+	// Unmapped token "customerZ-token" must equal what nextAPIKey would
+	// have produced with the same input — i.e., deterministic hash bucket.
+	want := c.nextAPIKey(cfg.EffectiveAPIKeys(), "customerZ-token")
+	if got := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), "customerZ-token", mappings); got != want {
+		t.Errorf("unmapped token: got %q, want %q (hash fallback)", got, want)
+	}
+	// And it must be stable across calls.
+	for i := 0; i < 5; i++ {
+		if got := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), "customerZ-token", mappings); got != want {
+			t.Errorf("iteration %d: hash fallback drifted, got %q, want %q", i, got, want)
+		}
+	}
+}
+
+// TestResolveAPIKey_OutOfRangeMappingFallsThrough verifies that a misconfigured
+// mapping (index out of range) is treated as a miss and falls through to the
+// hash path, so a bad config cannot panic and cannot strand a token to "".
+func TestResolveAPIKey_OutOfRangeMappingFallsThrough(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"sk-alice", "sk-bob"}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	mappings := map[string]int{
+		"overshoot": 99,  // way past end
+		"negative":  -1,  // negative
+		"edge":      2,   // exactly len(keys) (out of range)
+	}
+	for _, tok := range []string{"overshoot", "negative", "edge"} {
+		want := c.nextAPIKey(cfg.EffectiveAPIKeys(), tok)
+		got := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), tok, mappings)
+		if got != want {
+			t.Errorf("token %q with out-of-range mapping: got %q, want hash fallback %q", tok, got, want)
+		}
+		if got == "" {
+			t.Errorf("token %q: out-of-range mapping must not produce empty key", tok)
+		}
+	}
+}
+
+// TestResolveAPIKey_EmptyPoolAndEmptyToken verifies edge cases:
+// empty key pool -> "", empty token -> round-robin.
+func TestResolveAPIKey_EmptyPoolAndEmptyToken(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{}}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	if got := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), "any-token", map[string]int{"any-token": 0}); got != "" {
+		t.Errorf("empty pool: got %q, want \"\"", got)
+	}
+
+	cfg2 := &config.Config{APIKeys: []string{"k1", "k2", "k3"}}
+	atomicCfg2 := config.NewAtomicConfig(cfg2, "")
+	c2 := &OpenCodeClient{atomic: atomicCfg2}
+	// Empty token falls back to nextAPIKey which is round-robin.
+	got1 := c2.ResolveAPIKey(cfg2.EffectiveAPIKeys(), "", nil)
+	got2 := c2.ResolveAPIKey(cfg2.EffectiveAPIKeys(), "", nil)
+	if got1 != "k1" || got2 != "k2" {
+		t.Errorf("empty token: got (%q, %q), want (k1, k2) — round-robin", got1, got2)
 	}
 }

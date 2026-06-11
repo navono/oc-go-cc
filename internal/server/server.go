@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -129,8 +130,12 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// WritePID writes the current PID to a file.
+// WritePID writes the current PID to a file, creating parent directories
+// if they do not yet exist (e.g. first run after a fresh install).
 func WritePID(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create PID directory: %w", err)
+	}
 	pid := os.Getpid()
 	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0644)
 }

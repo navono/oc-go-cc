@@ -1,0 +1,25 @@
+services:
+  oc-go-cc:
+    build:
+      context: .
+      network: host
+    container_name: oc-go-cc
+    restart: unless-stopped
+    ports:
+      - "3456:3456"
+    volumes:
+      - ./configs/config.json:/etc/oc-go-cc/config.json:ro
+    env_file:
+      - .env
+    environment:
+      - OC_GO_CC_HOST=0.0.0.0
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3456/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3

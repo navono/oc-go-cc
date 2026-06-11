@@ -151,6 +151,13 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		"max_tokens", anthropicReq.MaxTokens,
 	)
 
+	// Resolve sticky key once for this request. Same inbound auth token
+	// always maps to the same upstream API key for the entire fallback
+	// chain — when config.sticky_key_enabled is true and the inbound
+	// request carries an auth token. Empty when the feature is off or
+	// the request has no auth header.
+	stickyKey := h.resolveStickyKey(r)
+
 	// Build message content for routing and token counting.
 	var routerMessages []router.MessageContent
 	var tokenMessages []token.MessageContent
@@ -184,20 +191,64 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Determine sticky key label for logging (don't log the full token)
+	stickyKeyLabel := ""
+	if stickyKey != "" {
+		if len(stickyKey) > 8 {
+			stickyKeyLabel = stickyKey[:4] + "..." + stickyKey[len(stickyKey)-4:]
+		} else {
+			stickyKeyLabel = "****"
+		}
+	}
+
 	h.logger.Info("routing request",
 		"scenario", routeResult.Scenario,
 		"model", routeResult.Primary.ModelID,
 		"provider", routeResult.Primary.Provider,
 		"tokens", tokenCount,
+		"sticky_key", stickyKeyLabel,
 	)
 
 	if isStreaming {
 		// Streaming: use ProxyStream for real-time SSE transformation
-		h.handleStreaming(w, r, &anthropicReq, modelChain, rawBody)
+		h.handleStreaming(w, r, &anthropicReq, modelChain, rawBody, stickyKey)
 	} else {
 		// Non-streaming: execute with fallback and return full response
-		h.handleNonStreaming(w, r, &anthropicReq, modelChain, rawBody)
+		h.handleNonStreaming(w, r, &anthropicReq, modelChain, rawBody, stickyKey)
 	}
+}
+
+// extractInboundToken returns the inbound auth token from the request, in the
+// order Claude Code (and the Anthropic SDK) typically sends it:
+//   1. x-api-key header (Anthropic-style)
+//   2. Authorization: Bearer <token> (OpenAI-style)
+//
+// Returns "" if neither is present.
+func extractInboundToken(r *http.Request) string {
+	if k := r.Header.Get("x-api-key"); k != "" {
+		return k
+	}
+	if a := r.Header.Get("Authorization"); a != "" {
+		return strings.TrimPrefix(a, "Bearer ")
+	}
+	return ""
+}
+
+// resolveStickyKey returns the inbound auth token to use for sticky API key
+// routing. Returns "" when the feature is disabled or the request carries no
+// token — in both cases the client falls back to round-robin.
+func (h *MessagesHandler) resolveStickyKey(r *http.Request) string {
+	cfg := h.client.AtomicConfig().Get()
+	if !cfg.StickyKeyEnabled {
+		return ""
+	}
+	token := extractInboundToken(r)
+	h.logger.Debug("sticky key resolved",
+		"enabled", cfg.StickyKeyEnabled,
+		"token", token,
+		"mappings_count", len(cfg.StickyKeyMappings),
+	)
+	return token
 }
 
 // buildModelChain resolves the request to a model chain (primary + fallbacks),
@@ -279,6 +330,7 @@ func (h *MessagesHandler) handleStreaming(
 	anthropicReq *types.MessageRequest,
 	modelChain []config.ModelConfig,
 	rawBody json.RawMessage,
+	stickyKey string,
 ) {
 	clientCtx := r.Context()
 
@@ -343,7 +395,7 @@ func (h *MessagesHandler) handleStreaming(
 			switch endpointType {
 			case client.EndpointAnthropic:
 				modelBody := replaceModelInRawBody(rawBody, model.ModelID)
-				if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
+				if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model, stickyKey); err != nil {
 					cancel()
 					if clientCtx.Err() == context.Canceled {
 						h.logger.Info("client disconnected during anthropic stream")
@@ -359,7 +411,7 @@ func (h *MessagesHandler) handleStreaming(
 				return
 
 			case client.EndpointResponses:
-				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
+				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx, stickyKey); err != nil {
 					cancel()
 					if clientCtx.Err() == context.Canceled {
 						h.logger.Info("client disconnected during responses stream")
@@ -375,7 +427,7 @@ func (h *MessagesHandler) handleStreaming(
 				return
 
 			case client.EndpointGemini:
-				if err := h.handleGeminiStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
+				if err := h.handleGeminiStreaming(ctx, rw, anthropicReq, model, clientCtx, stickyKey); err != nil {
 					cancel()
 					if clientCtx.Err() == context.Canceled {
 						h.logger.Info("client disconnected during gemini stream")
@@ -403,7 +455,7 @@ func (h *MessagesHandler) handleStreaming(
 			continue
 		}
 
-		streamBody, err := h.client.GetStreamingBody(ctx, model.ModelID, openaiReq, model)
+		streamBody, err := h.client.GetStreamingBody(ctx, model.ModelID, openaiReq, model, stickyKey)
 		if err != nil {
 			cancel()
 			if clientCtx.Err() == context.Canceled {
@@ -452,13 +504,14 @@ func (h *MessagesHandler) handleResponsesStreaming(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
 	clientCtx context.Context,
+	stickyKey string,
 ) error {
 	req, err := h.requestTransformer.TransformToResponses(anthropicReq, model)
 	if err != nil {
 		return fmt.Errorf("responses transform failed: %w", err)
 	}
 
-	streamBody, err := h.client.GetResponsesStreamingBody(ctx, model.ModelID, req, model)
+	streamBody, err := h.client.GetResponsesStreamingBody(ctx, model.ModelID, req, model, stickyKey)
 	if err != nil {
 		return err
 	}
@@ -479,13 +532,14 @@ func (h *MessagesHandler) handleGeminiStreaming(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
 	clientCtx context.Context,
+	stickyKey string,
 ) error {
 	req, err := h.requestTransformer.TransformToGemini(anthropicReq, model)
 	if err != nil {
 		return fmt.Errorf("gemini transform failed: %w", err)
 	}
 
-	streamBody, err := h.client.GetGeminiStreamingBody(ctx, model.ModelID, req, model)
+	streamBody, err := h.client.GetGeminiStreamingBody(ctx, model.ModelID, req, model, stickyKey)
 	if err != nil {
 		return err
 	}
@@ -528,12 +582,13 @@ func (h *MessagesHandler) handleAnthropicStreaming(
 	rawBody json.RawMessage,
 	modelID string,
 	model config.ModelConfig,
+	stickyKey string,
 ) error {
 	h.logger.Debug("sending anthropic streaming request",
 		"model_id", modelID,
 		"body_preview", string(rawBody)[:min(len(rawBody), 200)])
 
-	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, true, model)
+	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, true, model, stickyKey)
 	if err != nil {
 		return err
 	}
@@ -577,6 +632,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	anthropicReq *types.MessageRequest,
 	modelChain []config.ModelConfig,
 	rawBody json.RawMessage,
+	stickyKey string,
 ) {
 	ctx := r.Context()
 	startTime := time.Now()
@@ -584,27 +640,28 @@ func (h *MessagesHandler) handleNonStreaming(
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
 		modelChain,
-		func(ctx context.Context, model config.ModelConfig) ([]byte, error) {
+		stickyKey,
+		func(ctx context.Context, model config.ModelConfig, stickyKey string) ([]byte, error) {
 			// Zen models use their own endpoint classification
 			if client.IsZen(model) {
 				endpointType := client.ClassifyEndpoint(model.ModelID)
 				switch endpointType {
 				case client.EndpointAnthropic:
-					return h.executeAnthropicRequest(ctx, rawBody, model)
+					return h.executeAnthropicRequest(ctx, rawBody, model, stickyKey)
 				case client.EndpointResponses:
-					return h.executeResponsesRequest(ctx, anthropicReq, model)
+					return h.executeResponsesRequest(ctx, anthropicReq, model, stickyKey)
 				case client.EndpointGemini:
-					return h.executeGeminiRequest(ctx, anthropicReq, model)
+					return h.executeGeminiRequest(ctx, anthropicReq, model, stickyKey)
 				default:
 					// Fall through to OpenAI-compatible handling
 				}
 			} else if client.IsAnthropicModel(model.ModelID) {
 				// Go provider Anthropic-native models (MiniMax, Qwen)
-				return h.executeAnthropicRequest(ctx, rawBody, model)
+				return h.executeAnthropicRequest(ctx, rawBody, model, stickyKey)
 			}
 
 			// OpenAI-compatible models (both Go and Zen)
-			return h.executeOpenAIRequest(ctx, anthropicReq, model)
+			return h.executeOpenAIRequest(ctx, anthropicReq, model, stickyKey)
 		},
 	)
 
@@ -633,8 +690,9 @@ func (h *MessagesHandler) executeAnthropicRequest(
 	ctx context.Context,
 	rawBody json.RawMessage,
 	model config.ModelConfig,
+	stickyKey string,
 ) ([]byte, error) {
-	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, false, model)
+	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, false, model, stickyKey)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request failed: %w", err)
 	}
@@ -655,13 +713,14 @@ func (h *MessagesHandler) executeOpenAIRequest(
 	ctx context.Context,
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
+	stickyKey string,
 ) ([]byte, error) {
 	openaiReq, err := h.requestTransformer.TransformRequest(anthropicReq, model)
 	if err != nil {
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 
-	resp, err := h.client.ChatCompletionNonStreaming(ctx, model.ModelID, openaiReq, model)
+	resp, err := h.client.ChatCompletionNonStreaming(ctx, model.ModelID, openaiReq, model, stickyKey)
 	if err != nil {
 		return nil, fmt.Errorf("chat completion failed: %w", err)
 	}
@@ -679,13 +738,14 @@ func (h *MessagesHandler) executeResponsesRequest(
 	ctx context.Context,
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
+	stickyKey string,
 ) ([]byte, error) {
 	req, err := h.requestTransformer.TransformToResponses(anthropicReq, model)
 	if err != nil {
 		return nil, fmt.Errorf("responses transform failed: %w", err)
 	}
 
-	resp, err := h.client.ResponsesCompletionNonStreaming(ctx, model.ModelID, req, model)
+	resp, err := h.client.ResponsesCompletionNonStreaming(ctx, model.ModelID, req, model, stickyKey)
 	if err != nil {
 		return nil, fmt.Errorf("responses completion failed: %w", err)
 	}
@@ -703,13 +763,14 @@ func (h *MessagesHandler) executeGeminiRequest(
 	ctx context.Context,
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
+	stickyKey string,
 ) ([]byte, error) {
 	req, err := h.requestTransformer.TransformToGemini(anthropicReq, model)
 	if err != nil {
 		return nil, fmt.Errorf("gemini transform failed: %w", err)
 	}
 
-	resp, err := h.client.GeminiCompletionNonStreaming(ctx, model.ModelID, req, model)
+	resp, err := h.client.GeminiCompletionNonStreaming(ctx, model.ModelID, req, model, stickyKey)
 	if err != nil {
 		return nil, fmt.Errorf("gemini completion failed: %w", err)
 	}

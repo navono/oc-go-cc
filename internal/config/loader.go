@@ -108,7 +108,14 @@ func interpolateEnvVars(s string) string {
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("OC_GO_CC_API_KEY"); v != "" {
 		cfg.APIKey = v
-		cfg.APIKeys = nil // env var overrides both api_key and api_keys
+		// Only clear api_keys if the individual key env vars are not set.
+		// When OC_GO_CC_API_KEY_1/2/etc are present, the ${VAR} interpolation
+		// in loadJSON already populated api_keys — clearing it here would
+		// discard the multi-key pool and break sticky_key_mappings that
+		// reference indices > 0.
+		if os.Getenv("OC_GO_CC_API_KEY_1") == "" && os.Getenv("OC_GO_CC_API_KEY_2") == "" {
+			cfg.APIKeys = nil
+		}
 	}
 	if v := os.Getenv("OC_GO_CC_HOST"); v != "" {
 		cfg.Host = v

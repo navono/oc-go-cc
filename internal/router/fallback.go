@@ -167,10 +167,15 @@ func (h *FallbackHandler) getCircuitBreaker(modelID string) *CircuitBreaker {
 
 // ExecuteWithFallback tries models in sequence until one succeeds.
 // Respects circuit breaker state to skip models that are failing repeatedly.
+//
+// The executor callback's trailing string parameter is the sticky API key
+// (inbound auth token hashed to a deterministic upstream key); pass ""
+// to fall back to round-robin within this request.
 func (h *FallbackHandler) ExecuteWithFallback(
 	ctx context.Context,
 	models []config.ModelConfig,
-	executor func(context.Context, config.ModelConfig) ([]byte, error),
+	stickyKey string,
+	executor func(context.Context, config.ModelConfig, string) ([]byte, error),
 ) (*FallbackResult, []byte, error) {
 	totalModels := len(models)
 
@@ -193,7 +198,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			"total", totalModels,
 		)
 
-		body, err := executor(ctx, model)
+		body, err := executor(ctx, model, stickyKey)
 		if err == nil {
 			cb.RecordSuccess()
 			h.logger.Info("model succeeded",

@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -28,16 +30,82 @@ type OpenCodeClient struct {
 	keyCounter atomic.Uint64
 }
 
-// nextAPIKey returns the next API key in round-robin order from the given key pool.
+// nextAPIKey returns the next API key for a request.
+//
+// When stickyKey is non-empty, the key is chosen deterministically by hashing
+// the inbound auth token (FNV-1a 32-bit) — the same token always lands on the
+// same upstream key. When stickyKey is empty, the existing round-robin counter
+// is used.
+//
 // The caller provides keys from a single config read so baseURL and apiKey
 // always come from the same snapshot.
-func (c *OpenCodeClient) nextAPIKey(keys []string) string {
+func (c *OpenCodeClient) nextAPIKey(keys []string, stickyKey string) string {
 	if len(keys) == 0 {
 		return ""
 	}
 	n := uint64(len(keys))
+	if stickyKey != "" {
+		return keys[stickyKeyIndex(stickyKey, n)]
+	}
 	old := c.keyCounter.Add(1)
 	return keys[(old-1)%n]
+}
+
+// stickyKeyIndex maps an inbound auth token to a key-pool index via FNV-1a.
+// Non-cryptographic — we only need a stable, well-distributed bucket, not
+// security against adversaries (the token is already trusted by definition).
+func stickyKeyIndex(token string, n uint64) uint64 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(token))
+	return uint64(h.Sum32()) % n
+}
+
+// ResolveAPIKey picks the upstream API key for a request, applying the
+// explicit token-to-key mapping first (operator-curated) and falling back to
+// FNV-1a hash bucketing when no mapping matches. An empty token falls back to
+// round-robin (handled by the underlying nextAPIKey).
+//
+// The mappings argument is `token -> index into keys`; the index is bounds-
+// checked against len(keys) so a misconfigured mapping cannot panic. A mapping
+// whose index is out of range is treated as a miss and falls through to the
+// hash path, which still gives stable bucketing for that token.
+func (c *OpenCodeClient) ResolveAPIKey(keys []string, token string, mappings map[string]int) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	if token != "" {
+		if idx, ok := mappings[token]; ok {
+			if idx >= 0 && idx < len(keys) {
+				slog.Debug("sticky key: explicit mapping matched",
+					"token", token,
+					"index", idx,
+					"key_suffix", keySuffix(keys[idx]),
+				)
+				return keys[idx]
+			}
+			slog.Warn("sticky key: mapping index out of range, falling back to hash",
+				"token", token,
+				"index", idx,
+				"pool_size", len(keys),
+			)
+		}
+	}
+	return c.nextAPIKey(keys, token)
+}
+
+// keySuffix returns the last 6 characters of an API key for logging.
+func keySuffix(key string) string {
+	if len(key) <= 6 {
+		return "****"
+	}
+	return "..." + key[len(key)-6:]
+}
+
+// AtomicConfig exposes the underlying atomic config so callers (e.g. the
+// messages handler) can read per-request toggles like StickyKeyEnabled from
+// the same snapshot the client uses to pick an endpoint.
+func (c *OpenCodeClient) AtomicConfig() *config.AtomicConfig {
+	return c.atomic
 }
 
 // NewOpenCodeClient creates a new OpenCode client.
@@ -153,9 +221,23 @@ func isResponsesModel(modelID string) bool {
 }
 
 // getEndpoint returns the appropriate endpoint config for a model.
-func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig) endpointConfig {
+func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig, stickyKey string) endpointConfig {
 	cfg := c.atomic.Get()
-	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), stickyKey, cfg.StickyKeyMappings)
+
+	provider := Provider(modelConfig)
+	slog.Debug("resolved endpoint",
+		"model", modelID,
+		"provider", provider,
+		"sticky_key", stickyKey,
+		"api_key_suffix", keySuffix(apiKey),
+		"base_url", func() string {
+			if IsZen(modelConfig) {
+				return cfg.OpenCodeZen.BaseURL
+			}
+			return cfg.OpenCodeGo.BaseURL
+		}(),
+	)
 
 	if IsZen(modelConfig) {
 		zen := cfg.OpenCodeZen
@@ -190,8 +272,9 @@ func (c *OpenCodeClient) ChatCompletion(
 	modelID string,
 	req *types.ChatCompletionRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*http.Response, error) {
-	endpoint := c.getEndpoint(modelID, modelConfig)
+	endpoint := c.getEndpoint(modelID, modelConfig, stickyKey)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -235,11 +318,12 @@ func (c *OpenCodeClient) ChatCompletionNonStreaming(
 	modelID string,
 	req *types.ChatCompletionRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*types.ChatCompletionResponse, error) {
 	streamFalse := false
 	req.Stream = &streamFalse
 
-	resp, err := c.ChatCompletion(ctx, modelID, req, modelConfig)
+	resp, err := c.ChatCompletion(ctx, modelID, req, modelConfig, stickyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -264,11 +348,12 @@ func (c *OpenCodeClient) GetStreamingBody(
 	modelID string,
 	req *types.ChatCompletionRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (io.ReadCloser, error) {
 	streamTrue := true
 	req.Stream = &streamTrue
 
-	resp, err := c.ChatCompletion(ctx, modelID, req, modelConfig)
+	resp, err := c.ChatCompletion(ctx, modelID, req, modelConfig, stickyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -282,9 +367,10 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 	body []byte,
 	stream bool,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*http.Response, error) {
 	cfg := c.atomic.Get()
-	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := c.ResolveAPIKey(cfg.EffectiveAPIKeys(), stickyKey, cfg.StickyKeyMappings)
 
 	var baseURL string
 	if IsZen(modelConfig) {
@@ -326,8 +412,9 @@ func (c *OpenCodeClient) ResponsesCompletion(
 	modelID string,
 	req *types.ResponsesRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*http.Response, error) {
-	endpoint := c.getEndpoint(modelID, modelConfig)
+	endpoint := c.getEndpoint(modelID, modelConfig, stickyKey)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -362,10 +449,11 @@ func (c *OpenCodeClient) ResponsesCompletionNonStreaming(
 	modelID string,
 	req *types.ResponsesRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*types.ResponsesResponse, error) {
 	req.Stream = false
 
-	resp, err := c.ResponsesCompletion(ctx, modelID, req, modelConfig)
+	resp, err := c.ResponsesCompletion(ctx, modelID, req, modelConfig, stickyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -390,10 +478,11 @@ func (c *OpenCodeClient) GetResponsesStreamingBody(
 	modelID string,
 	req *types.ResponsesRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (io.ReadCloser, error) {
 	req.Stream = true
 
-	resp, err := c.ResponsesCompletion(ctx, modelID, req, modelConfig)
+	resp, err := c.ResponsesCompletion(ctx, modelID, req, modelConfig, stickyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -407,8 +496,9 @@ func (c *OpenCodeClient) GeminiCompletion(
 	modelID string,
 	req *types.GeminiRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*http.Response, error) {
-	endpoint := c.getEndpoint(modelID, modelConfig)
+	endpoint := c.getEndpoint(modelID, modelConfig, stickyKey)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -443,10 +533,11 @@ func (c *OpenCodeClient) GeminiCompletionNonStreaming(
 	modelID string,
 	req *types.GeminiRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (*types.GeminiResponse, error) {
 	req.Stream = false
 
-	resp, err := c.GeminiCompletion(ctx, modelID, req, modelConfig)
+	resp, err := c.GeminiCompletion(ctx, modelID, req, modelConfig, stickyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -471,10 +562,11 @@ func (c *OpenCodeClient) GetGeminiStreamingBody(
 	modelID string,
 	req *types.GeminiRequest,
 	modelConfig config.ModelConfig,
+	stickyKey string,
 ) (io.ReadCloser, error) {
 	req.Stream = true
 
-	resp, err := c.GeminiCompletion(ctx, modelID, req, modelConfig)
+	resp, err := c.GeminiCompletion(ctx, modelID, req, modelConfig, stickyKey)
 	if err != nil {
 		return nil, err
 	}

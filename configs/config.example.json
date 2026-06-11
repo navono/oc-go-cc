@@ -1,5 +1,15 @@
 {
   "api_key": "${OC_GO_CC_API_KEY}",
+  "api_keys": [
+    "${OC_GO_CC_API_KEY_1}",
+    "${OC_GO_CC_API_KEY_2}",
+    "${OC_GO_CC_API_KEY_3}"
+  ],
+  "sticky_key_enabled": true,
+  "sticky_key_mappings": {
+    "custom_A": 0,
+    "custom_B": 1
+  },
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,

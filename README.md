@@ -77,6 +77,69 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
 export ANTHROPIC_AUTH_TOKEN=unused
 ```
 
+## Multiple API Keys & Sticky Routing
+
+By default `oc-go-cc` rotates through a single `api_key`. To distribute load
+across multiple OpenCode accounts (e.g. per-customer billing or per-team
+quotas), define an `api_keys` array. Set `"sticky_key_enabled": true` if you
+want the same inbound client to always land on the same upstream key — the
+inbound `ANTHROPIC_AUTH_TOKEN` (or the `x-api-key` / `Authorization: Bearer`
+header that Claude Code sends) is hashed (FNV-1a 32-bit) to pick the key
+deterministically, and the choice is locked for the entire fallback chain so
+a request that fails over from primary to backup model stays on the same
+upstream account.
+
+```json
+{
+  "api_keys": [
+    "${OC_GO_CC_API_KEY_1}",
+    "${OC_GO_CC_API_KEY_2}",
+    "${OC_GO_CC_API_KEY_3}"
+  ],
+  "sticky_key_enabled": true
+}
+```
+
+- `api_keys` takes precedence over `api_key`; omit `api_key` when using the
+  array form.
+- When `sticky_key_enabled` is `false` (the default) the keys are picked by
+  round-robin — the same as before this feature.
+- When `sticky_key_enabled` is `true` but the inbound request has no auth
+  token, the proxy falls back to round-robin so requests are never dropped.
+
+### Pin a specific `ANTHROPIC_AUTH_TOKEN` to a specific key
+
+For per-customer / per-team billing or quota isolation, add an explicit
+`sticky_key_mappings` table. The proxy checks this map first — an exact
+match wins regardless of the FNV-1a hash result. Unmapped tokens still
+fall back to hash bucketing.
+
+```json
+{
+  "api_keys": [
+    "sk-alice-account",
+    "sk-bob-account",
+    "sk-carol-account"
+  ],
+  "sticky_key_enabled": true,
+  "sticky_key_mappings": {
+    "customerA-token": 0,
+    "customerB-token": 1,
+    "customerC-token": 2
+  }
+}
+```
+
+The numbers are **indices into `api_keys`** (0-based). The token strings are
+the exact `ANTHROPIC_AUTH_TOKEN` values your clients send. With this config
+in place, every request carrying `customerA-token` is pinned to
+`sk-alice-account` for its entire fallback chain; clients that mistype or
+send an unknown token are still handled via the hash bucket — they are
+never dropped, just routed to a less predictable upstream key.
+
+Misconfigured entries (out-of-range index) are silently treated as misses,
+so a typo in the config cannot break the proxy.
+
 ### 5. Run Claude Code
 
 ```bash

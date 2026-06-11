@@ -3,6 +3,5 @@
 .env.*
 bin/
 dist/
-.tmp/
 configs/config.json
 *.md
