@@ -669,3 +669,92 @@ func TestResolveAPIKey_EmptyPoolAndEmptyToken(t *testing.T) {
 		t.Errorf("empty token: got (%q, %q), want (k1, k2) — round-robin", got1, got2)
 	}
 }
+
+// goSubscriptionModels is the authoritative list of model IDs included in the
+// OpenCode Go subscription, paired with the endpoint each one uses per the docs
+// (https://opencode.ai/docs/go). anthropic=true means the model is served on
+// the Go Anthropic endpoint (/v1/messages); false means the Go chat-completions
+// endpoint (/v1/chat/completions). This table is the routing contract for Go
+// models — keep it in sync with the docs when OpenCode adds models.
+var goSubscriptionModels = []struct {
+	modelID   string
+	anthropic bool
+}{
+	// OpenAI-compatible endpoint: https://opencode.ai/zen/go/v1/chat/completions
+	{"glm-5.1", false},
+	{"glm-5", false},
+	{"kimi-k2.7", false},
+	{"kimi-k2.6", false},
+	{"deepseek-v4-pro", false},
+	{"deepseek-v4-flash", false},
+	{"mimo-v2.5", false},
+	{"mimo-v2.5-pro", false},
+	// Anthropic endpoint: https://opencode.ai/zen/go/v1/messages
+	{"minimax-m3", true},
+	{"minimax-m2.7", true},
+	{"minimax-m2.5", true},
+	{"qwen3.7-max", true},
+	{"qwen3.7-plus", true},
+	{"qwen3.6-plus", true},
+}
+
+// TestGoSubscriptionModelsRouteToGoEndpoint tests every model in the OpenCode
+// Go subscription individually, asserting for each that:
+//   - IsAnthropicModel classifies it to the endpoint the docs specify, and
+//   - an opencode-go ModelConfig resolves (via getEndpoint) to the matching Go
+//     base URL — and is never treated as a Zen model or routed to a Zen URL.
+//
+// Guards the regression where a Go model's model_overrides entry pointed at
+// provider=opencode-zen (whose account had no balance), causing a 401 and a
+// silent fallback to an unrelated model.
+func TestGoSubscriptionModelsRouteToGoEndpoint(t *testing.T) {
+	const (
+		goBaseURL          = "https://opencode.ai/zen/go/v1/chat/completions"
+		goAnthropicBaseURL = "https://opencode.ai/zen/go/v1/messages"
+		zenBaseURL         = "https://opencode.ai/zen/v1/chat/completions"
+		zenAnthropicURL    = "https://opencode.ai/zen/v1/messages"
+	)
+
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			BaseURL:          goBaseURL,
+			AnthropicBaseURL: goAnthropicBaseURL,
+		},
+		OpenCodeZen: config.OpenCodeZenConfig{
+			BaseURL:          zenBaseURL,
+			AnthropicBaseURL: zenAnthropicURL,
+		},
+		APIKeys: []string{"go-key"},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := &OpenCodeClient{atomic: atomicCfg}
+
+	for _, m := range goSubscriptionModels {
+		t.Run(m.modelID, func(t *testing.T) {
+			// Endpoint classification matches the docs.
+			if got := IsAnthropicModel(m.modelID); got != m.anthropic {
+				t.Errorf("IsAnthropicModel(%q) = %v, want %v", m.modelID, got, m.anthropic)
+			}
+
+			modelCfg := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: m.modelID}
+
+			// A Go-provider config must not be treated as Zen.
+			if IsZen(modelCfg) {
+				t.Errorf("IsZen(%q) = true; Go subscription model must not be Zen", m.modelID)
+			}
+
+			// And it must resolve to the matching Go base URL.
+			ep := c.getEndpoint(m.modelID, modelCfg, "")
+			wantBase := goBaseURL
+			if m.anthropic {
+				wantBase = goAnthropicBaseURL
+			}
+			if ep.BaseURL != wantBase {
+				t.Errorf("getEndpoint(%q) BaseURL = %q, want %q", m.modelID, ep.BaseURL, wantBase)
+			}
+			if ep.APIKey != "go-key" {
+				t.Errorf("getEndpoint(%q) APIKey = %q, want %q", m.modelID, ep.APIKey, "go-key")
+			}
+		})
+	}
+}
