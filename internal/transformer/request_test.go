@@ -1184,6 +1184,83 @@ func TestTransformRequestExtractsThinkingFromToolUseBlock(t *testing.T) {
 	}
 }
 
+// Regression test for a production 400 from Moonshot:
+//
+//	"Error from provider (Moonshot AI): invalid temperature: only 1 is allowed
+//	 for this model"
+//
+// kimi-k2.7-code is a reasoning model that only accepts temperature=1. The
+// proxy forwarded the configured/client temperature verbatim (the example
+// config sets 0.7 everywhere, so a kimi-k2.7-code entry copied from kimi-k2.6
+// inherits 0.7), and Moonshot rejected it. The pin must win over both the
+// per-model config override and whatever the client request carries, while
+// kimi-k2.6 (non-reasoning) keeps its configured temperature untouched.
+func TestTransformRequestPinsTemperatureOneForKimiK27(t *testing.T) {
+	transformer := NewRequestTransformer()
+
+	req := func() *types.MessageRequest {
+		clientTemp := 0.3
+		return &types.MessageRequest{
+			Model:       "claude-test",
+			MaxTokens:   256,
+			Temperature: &clientTemp,
+			Messages: []types.Message{
+				{Role: "user", Content: json.RawMessage(`"hello"`)},
+			},
+		}
+	}
+
+	t.Run("kimi-k2.7-code pins over client and config temperature", func(t *testing.T) {
+		openaiReq, err := transformer.TransformRequest(req(), config.ModelConfig{
+			ModelID:     "kimi-k2.7-code",
+			Temperature: 0.7, // mirrored from the example config's kimi-k2.6 entry
+		})
+		if err != nil {
+			t.Fatalf("TransformRequest() error = %v", err)
+		}
+		if openaiReq.Temperature == nil {
+			t.Fatal("Temperature = nil, want 1.0")
+		}
+		if got, want := *openaiReq.Temperature, 1.0; got != want {
+			t.Fatalf("Temperature = %v, want %v (kimi-k2.7-code must pin to 1)", got, want)
+		}
+	})
+
+	t.Run("kimi-k2.7 (bare) also pins", func(t *testing.T) {
+		openaiReq, err := transformer.TransformRequest(req(), config.ModelConfig{ModelID: "kimi-k2.7"})
+		if err != nil {
+			t.Fatalf("TransformRequest() error = %v", err)
+		}
+		if openaiReq.Temperature == nil || *openaiReq.Temperature != 1.0 {
+			t.Fatalf("Temperature = %v, want 1.0", deref(openaiReq.Temperature))
+		}
+	})
+
+	t.Run("kimi-k2.6 keeps client/config temperature (untouched)", func(t *testing.T) {
+		openaiReq, err := transformer.TransformRequest(req(), config.ModelConfig{
+			ModelID:     "kimi-k2.6",
+			Temperature: 0.7,
+		})
+		if err != nil {
+			t.Fatalf("TransformRequest() error = %v", err)
+		}
+		// Config override (0.7) takes precedence over the client's 0.3.
+		if openaiReq.Temperature == nil {
+			t.Fatal("Temperature = nil, want 0.7")
+		}
+		if got, want := *openaiReq.Temperature, 0.7; got != want {
+			t.Fatalf("Temperature = %v, want %v (kimi-k2.6 must not be pinned)", got, want)
+		}
+	})
+}
+
+func deref(p *float64) float64 {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
 func mustJSONBytes(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

@@ -52,6 +52,17 @@ func needsPlaceholderReasoning(modelID string) bool {
 	return strings.HasPrefix(modelID, "kimi-")
 }
 
+// requiresTemperatureOne returns true for reasoning models whose provider only
+// accepts temperature=1. Moonshot's Kimi K2.7 family (e.g. kimi-k2.7-code) is a
+// thinking model that rejects any other temperature with an
+// "invalid temperature: only 1 is allowed for this model" 400, so the proxy
+// must pin it to 1 regardless of what the client request or the per-model
+// config override carries. kimi-k2.6 is not a reasoning model and is left
+// untouched.
+func requiresTemperatureOne(modelID string) bool {
+	return strings.HasPrefix(modelID, "kimi-k2.7")
+}
+
 // stripCacheControl removes cache_control from all messages in the list.
 // The caller must not hold references to the slice elements.
 func stripCacheControl(messages []types.ChatMessage) {
@@ -107,6 +118,14 @@ func (t *RequestTransformer) TransformRequest(
 	if model.MaxTokens > 0 {
 		maxTokens := model.MaxTokens
 		openaiReq.MaxTokens = &maxTokens
+	}
+
+	// Provider quirk: some reasoning models (e.g. Moonshot's kimi-k2.7-code)
+	// only accept temperature=1 and 400 on anything else. Pin it after the
+	// client/config sources above so this always wins.
+	if requiresTemperatureOne(model.ModelID) {
+		one := 1.0
+		openaiReq.Temperature = &one
 	}
 
 	// Determine thinking and reasoning_effort for the upstream request.
